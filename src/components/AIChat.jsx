@@ -90,14 +90,18 @@ function MessageBubble({ message }) {
           />
         )}
       </div>
+      {!isUser && message.tokensUsed != null && !message.loading && (
+        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4, paddingLeft: 30 }}>
+          Used {message.tokensUsed.toLocaleString()} tokens · {(message.remainingBalance ?? 0).toLocaleString()} remaining
+        </div>
+      )}
     </motion.div>
   );
 }
 
-export function AIChat({ gemini, editorCode, language, hasApiKey, isSignedIn, onApiKeyNeeded }) {
-  // Own key → direct to Gemini; signed in → built-in proxy (if the server has a key)
-  const canUseAI = hasApiKey || isSignedIn;
-  const { messages, isLoading, error, sendMessage, clearMessages } = gemini || {};
+export function AIChat({ ai: aiHook, editorCode, language, isSignedIn, credits, onBuyTokens }) {
+  const canUseAI = isSignedIn && credits?.balance > 0;
+  const { messages, isLoading, error, sendMessage, clearMessages, isExhausted } = aiHook || {};
   const onClear = clearMessages || (() => {});
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
@@ -139,7 +143,7 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, isSignedIn, on
           <h2>NexIDE AI</h2>
           <div className="ai-status">
             <div className="ai-status-dot" aria-hidden="true" />
-            {hasApiKey ? 'Gemini · your key' : isSignedIn ? 'Gemini · built-in' : 'Setup required'}
+            {credits ? `🪙 ${credits.balance.toLocaleString()} tokens` : isSignedIn ? 'Loading…' : 'Sign in required'}
           </div>
         </div>
         <div style={{ flex: 1 }} />
@@ -155,16 +159,22 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, isSignedIn, on
         </button>
       </div>
 
-      {/* API Key Warning */}
-      {!canUseAI && (
+      {/* Auth / Credits Warning */}
+      {!isSignedIn && (
         <div className="api-key-banner" role="alert">
           <AlertTriangle size={12} aria-hidden="true" />
+          <span>Sign in to use AI assistance.</span>
+        </div>
+      )}
+      {isSignedIn && isExhausted && (
+        <div className="api-key-banner" role="alert" style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.3)' }}>
+          <AlertTriangle size={12} aria-hidden="true" />
           <span>
-          Add your <strong>Gemini API key</strong> or sign in to enable AI assistance.{' '}
+            Your AI tokens are exhausted.{' '}
             <button
               style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', fontSize: 'inherit', padding: 0, textDecoration: 'underline' }}
-              onClick={onApiKeyNeeded}
-            >Open Settings →</button>
+              onClick={onBuyTokens}
+            >Buy More Tokens →</button>
           </span>
         </div>
       )}
@@ -182,7 +192,7 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, isSignedIn, on
               NexIDE AI Assistant
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: 11, marginBottom: 16 }}>
-              Powered by Google Gemini
+              Powered by NexIDE AI
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -266,7 +276,7 @@ export function AIChat({ gemini, editorCode, language, hasApiKey, isSignedIn, on
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={canUseAI ? 'Ask AI about your code… (Enter to send, Shift+Enter for newline)' : 'Add a Gemini key in Settings or sign in to chat'}
+            placeholder={canUseAI ? 'Ask AI about your code… (Enter to send, Shift+Enter for newline)' : isSignedIn ? 'Purchase tokens to use AI' : 'Sign in to chat'}
             disabled={!canUseAI || isLoading}
             rows={1}
             aria-label="AI chat input"

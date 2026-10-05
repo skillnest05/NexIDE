@@ -1,6 +1,6 @@
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 
-export function StatusBar({ language = 'plaintext', cursorLine = 1, cursorCol = 1, status = 'idle', githubMode, branch, fileName, isDirty, nodeCount = 0, notice = null }) {
+export function StatusBar({ language = 'plaintext', cursorLine = 1, cursorCol = 1, status = 'idle', githubMode, branch, fileName, isDirty, nodeCount = 0, notice = null, credits = null, onBuyTokens }) {
   const statusConfig = {
     idle:    { label: 'Ready',   color: 'default' },
     running: { label: 'Running', color: 'running' },
@@ -92,9 +92,20 @@ export function StatusBar({ language = 'plaintext', cursorLine = 1, cursorCol = 
 
       <div className="statusbar-divider" aria-hidden="true" />
 
-      <div className="statusbar-item" title="Gemini AI powered">
-        <span>✨ Gemini AI</span>
-      </div>
+      {credits ? (
+        <div
+          className="statusbar-item"
+          title={`Token balance: ${credits.balance.toLocaleString()}`}
+          style={{ cursor: 'pointer', color: credits.balance > 200 ? undefined : 'var(--accent-red, #ef4444)' }}
+          onClick={onBuyTokens}
+        >
+          <span>🪙 {credits.balance.toLocaleString()}{credits.balance <= 200 ? ' · Buy More' : ''}</span>
+        </div>
+      ) : (
+        <div className="statusbar-item" title="AI powered">
+          <span>✨ NexIDE AI</span>
+        </div>
+      )}
     </footer>
   );
 }

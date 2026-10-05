@@ -1,16 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const getUser = vi.fn();
-const generateContent = vi.fn();
+const mockSendToAgent = vi.fn();
+const mockCheckBalance = vi.fn();
+const mockDeductTokens = vi.fn();
+const mockLogUsage = vi.fn();
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({ auth: { getUser } }),
 }));
-vi.mock('@google/generative-ai', () => ({
-  GoogleGenerativeAI: class {
-    getGenerativeModel() { return { generateContent }; }
-  },
+
+vi.mock('../api/_lib/opencodeBridge.js', () => ({
+  sendToAgent: (...args) => mockSendToAgent(...args),
 }));
+
+vi.mock('../api/_lib/tokenAccounting.js', () => ({
+  checkBalance: (...args) => mockCheckBalance(...args),
+  deductTokens: (...args) => mockDeductTokens(...args),
+  logUsage: (...args) => mockLogUsage(...args),
+}));
+
+// Mock the global budget tracker export from rateLimit
+vi.mock('../api/_lib/rateLimit.js', async (importOriginal) => {
+  const original = await importOriginal();
+  return {
+    ...original,
+    createGlobalBudgetTracker: () => ({
+      check: () => Promise.resolve({ allowed: true, remaining: 999999 }),
+      record: () => Promise.resolve(),
+    }),
+  };
+});
 
 function mockRes() {
   const res = { statusCode: 200, body: null, headers: {} };
@@ -30,8 +50,11 @@ let handler;
 beforeEach(async () => {
   vi.resetModules();
   getUser.mockReset();
-  generateContent.mockReset();
-  process.env.GEMINI_API_KEY = 'server-key';
+  mockSendToAgent.mockReset();
+  mockCheckBalance.mockReset();
+  mockDeductTokens.mockReset();
+  mockLogUsage.mockReset();
+  process.env.OPENCODE_SERVER_URL = 'http://127.0.0.1:4096';
   process.env.VITE_SUPABASE_URL = 'https://example.supabase.co';
   process.env.VITE_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_test';
   process.env.AI_RATE_LIMIT_PER_MINUTE = '2';
@@ -49,7 +72,7 @@ describe('/api/generate', () => {
     const res = mockRes();
     await handler(post({ userText: 'hi' }), res);
     expect(res.statusCode).toBe(401);
-    expect(generateContent).not.toHaveBeenCalled();
+    expect(mockSendToAgent).not.toHaveBeenCalled();
   });
 
   it('rejects invalid tokens', async () => {
@@ -59,30 +82,49 @@ describe('/api/generate', () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it('returns 402 when user has zero balance', async () => {
+    getUser.mockResolvedValue({ data: { user: { id: 'u1' } }, error: null });
+    mockCheckBalance.mockResolvedValue({ balance: 0, lifetime_used: 500, lifetime_purchased: 500 });
+    const res = mockRes();
+    await handler(post({ userText: 'hi' }, 'tok'), res);
+    expect(res.statusCode).toBe(402);
+    expect(res.body.code).toBe('NO_CREDITS');
+    expect(mockSendToAgent).not.toHaveBeenCalled();
+  });
+
   it('validates input', async () => {
     getUser.mockResolvedValue({ data: { user: { id: 'u1' } }, error: null });
+    mockCheckBalance.mockResolvedValue({ balance: 1000, lifetime_used: 0, lifetime_purchased: 0 });
     const res = mockRes();
     await handler(post({ userText: '' }, 'tok'), res);
     expect(res.statusCode).toBe(400);
   });
 
-  it('answers and then rate-limits per user', async () => {
+  it('answers with tokens used and deducts balance', async () => {
     getUser.mockResolvedValue({ data: { user: { id: 'u2' } }, error: null });
-    generateContent.mockResolvedValue({ response: { text: () => 'answer' } });
-    const results = [];
-    for (let i = 0; i < 3; i++) {
-      const res = mockRes();
-      await handler(post({ userText: 'hi', messages: [] }, 'tok'), res);
-      results.push(res.statusCode);
-    }
-    expect(results).toEqual([200, 200, 429]);
+    mockCheckBalance.mockResolvedValue({ balance: 1000, lifetime_used: 0, lifetime_purchased: 0 });
+    mockSendToAgent.mockResolvedValue({ text: 'answer', inputTokens: 10, outputTokens: 20 });
+    mockDeductTokens.mockResolvedValue(970);
+    mockLogUsage.mockResolvedValue();
+
+    const res = mockRes();
+    await handler(post({ userText: 'hi', messages: [] }, 'tok'), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.text).toBe('answer');
+    expect(res.body.tokensUsed).toBe(30);
+    expect(res.body.remainingBalance).toBe(970);
+    expect(mockDeductTokens).toHaveBeenCalledWith('u2', 30);
+    expect(mockLogUsage).toHaveBeenCalledWith('u2', 10, 20, 'opencode');
   });
 
-  it('never accepts a client-supplied key', async () => {
-    delete process.env.GEMINI_API_KEY;
+  it('returns 503 when OPENCODE_SERVER_URL is missing', async () => {
+    delete process.env.OPENCODE_SERVER_URL;
+    vi.resetModules();
+    const { default: freshHandler } = await import('../api/generate.js');
+    getUser.mockResolvedValue({ data: { user: { id: 'u1' } }, error: null });
     const res = mockRes();
-    await handler(post({ userText: 'hi', customKey: 'attacker-key' }, 'tok'), res);
+    await freshHandler(post({ userText: 'hi' }, 'tok'), res);
     expect(res.statusCode).toBe(503);
-    expect(generateContent).not.toHaveBeenCalled();
+    expect(mockSendToAgent).not.toHaveBeenCalled();
   });
 });

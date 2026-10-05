@@ -13,13 +13,14 @@ import './styles/playground.css'; // Playground design layer — must load after
 // Hooks
 import { useCodeRunner }      from './hooks/useCodeRunner';
 import { usePython }          from './hooks/usePython';
-import { useGemini }          from './hooks/useGemini';
+import { useAI }              from './hooks/useAI';
 import { useNotice }          from './hooks/useNotice';
 import { useSettings }        from './hooks/useSettings';
 import { useWorkspace }       from './hooks/useWorkspace';
 import { useProgramInput }    from './hooks/useProgramInput';
 import { usePackageLocks }    from './hooks/usePackageLocks';
 import { useDeployRecovery }  from './hooks/useDeployRecovery';
+import { useCredits }         from './hooks/useCredits';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { useCelebrate }       from './hooks/useCelebrate';
 import { stdinLines }         from './runtime/output';
@@ -33,6 +34,9 @@ import { GitHubModal }    from './components/GitHubModal';
 import { WelcomeScreen }  from './components/WelcomeScreen';
 import { CommandPalette } from './components/CommandPalette';
 import { AuthModal }      from './components/AuthModal';
+import { AuthWall }       from './components/AuthWall';
+import { PricingPage }    from './components/PricingPage';
+import { BuyTokensModal } from './components/BuyTokensModal';
 import { BottomPanel, RightPanel } from './components/Panels';
 import { ChunkErrorBoundary } from './components/ChunkErrorBoundary';
 import { TabBar } from './components/TabBar';
@@ -120,8 +124,10 @@ export default function App() {
   useCelebrate(runStatus);
 
   // ── AI ───────────────────────────────────────────────────────────
-  const gemini = useGemini({ apiKey: settings.geminiApiKey });
-  const { sendMessage: sendAiMessage } = gemini;
+  const ai = useAI();
+  const { sendMessage: sendAiMessage } = ai;
+  const { credits, loading: creditsLoading, fetchCredits, updateBalance } = useCredits(user);
+  const [buyTokensOpen, setBuyTokensOpen] = useState(false);
 
   const handleAiAction = useCallback((action, lineNum, snippet) => {
     setRightPanel('ai');
@@ -267,6 +273,11 @@ export default function App() {
   return (
     <div className="app" id="nexide-app" data-theme={settings.theme || 'nexide-dark'}>
 
+      {/* Auth Gate: show sign-in wall if not authenticated */}
+      {!user && <AuthWall />}
+
+      {/* IDE renders only when signed in */}
+      {user && (<>
       <TopBar
         language={activeTab?.lang || 'plaintext'}
         onLanguageChange={(lang) => {
@@ -434,12 +445,12 @@ export default function App() {
             onClose={() => setRightPanel(null)}
             preview={{ code: activeTab?.content || '', language: activeTab?.lang || 'plaintext', onConsoleMessage: addConsoleMessage }}
             ai={{
-              gemini,
+              ai,
               editorCode: activeTab?.content || '',
               language: activeTab?.lang || 'plaintext',
-              hasApiKey: !!settings.geminiApiKey,
               isSignedIn: !!user,
-              onApiKeyNeeded: () => setSettingsOpen(true),
+              credits,
+              onBuyTokens: () => setBuyTokensOpen(true),
             }}
             map={{ activeTab, fileTree, onNodeClick: handleMapNodeClick }}
             packages={{
@@ -472,12 +483,16 @@ export default function App() {
         githubMode={githubMode}
         branch={githubInfo?.branch}
         notice={statusNotice}
+        credits={credits}
+        onBuyTokens={() => setBuyTokensOpen(true)}
       />
 
-      <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} onSettingsChange={setSettings} isExhausted={gemini.isExhausted} />
+      <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} onSettingsChange={setSettings} credits={credits} />
       <GitHubModal open={githubOpen} onClose={() => setGithubOpen(false)} onLoad={handleGitHubLoad} githubToken={settings.githubToken} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} openTabs={tabs} fileTree={fileTree} onOpenFile={openFileInTab} onCommand={handleCommand} />
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      <BuyTokensModal open={buyTokensOpen} onClose={() => setBuyTokensOpen(false)} user={user} onPurchaseComplete={fetchCredits} />
+      </>)}
     </div>
   );
 }

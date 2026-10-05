@@ -12,14 +12,14 @@ export function createMemoryStore() {
   const counters = new Map(); // key -> { count, expiresAt }
   return {
     kind: 'memory',
-    async incr(key, ttlMs) {
+    async incr(key, ttlMs, amount = 1) {
       const now = Date.now();
       let entry = counters.get(key);
       if (!entry || entry.expiresAt <= now) {
         entry = { count: 0, expiresAt: now + ttlMs };
         counters.set(key, entry);
       }
-      entry.count += 1;
+      entry.count += amount;
       if (counters.size > 50_000) {
         for (const [k, v] of counters) if (v.expiresAt <= now) counters.delete(k);
       }
@@ -32,19 +32,20 @@ export function createUpstashStore(url, token, fetchImpl = fetch) {
   const endpoint = `${url.replace(/\/+$/, '')}/pipeline`;
   return {
     kind: 'upstash',
-    async incr(key, ttlMs) {
+    async incr(key, ttlMs, amount = 1) {
       const res = await fetchImpl(endpoint, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify([
-          ['INCR', key],
+          amount === 1 ? ['INCR', key] : (amount === 0 ? ['GET', key] : ['INCRBY', key, String(amount)]),
           ['PEXPIRE', key, String(ttlMs), 'NX'],
         ]),
       });
       if (!res.ok) throw new Error(`Upstash HTTP ${res.status}`);
-      const [incr] = await res.json();
+      const json = await res.json();
+      const incr = json[0];
       if (incr?.error) throw new Error(`Upstash: ${incr.error}`);
-      return Number(incr.result);
+      return Number(incr.result || 0);
     },
   };
 }
@@ -99,4 +100,33 @@ export function rateLimiterFromEnv(env = process.env) {
     perDay: Number(env.AI_RATE_LIMIT_PER_DAY) || 200,
     store: url && token ? createUpstashStore(url, token) : undefined,
   });
+}
+
+export function createGlobalBudgetTracker(store, dailyBudget, now = () => Date.now()) {
+  const fallback = createMemoryStore();
+  const primary = store || fallback;
+  
+  async function doIncr(key, ttl, amount) {
+    if (primary === fallback) return fallback.incr(key, ttl, amount);
+    try {
+      return await primary.incr(key, ttl, amount);
+    } catch (err) {
+      console.error('[global-budget] shared store unavailable:', err.message);
+      return fallback.incr(key, ttl, amount);
+    }
+  }
+
+  return {
+    async check() {
+      const dateStr = new Date(now()).toISOString().split('T')[0];
+      const key = `nexide:global:tokens:day:${dateStr}`;
+      const count = await doIncr(key, DAY, 0);
+      return { allowed: count <= dailyBudget, remaining: Math.max(0, dailyBudget - count) };
+    },
+    async record(tokens) {
+      const dateStr = new Date(now()).toISOString().split('T')[0];
+      const key = `nexide:global:tokens:day:${dateStr}`;
+      await doIncr(key, DAY, tokens);
+    }
+  };
 }

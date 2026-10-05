@@ -17,9 +17,8 @@ export function Settings({ open, ...props }) {
   return <SettingsDialog {...props} />;
 }
 
-function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
+function SettingsDialog({ onClose, settings, onSettingsChange, credits }) {
   const [draft, setDraft]             = useState(settings);
-  const [showKey, setShowKey]         = useState(false);
   const [showGhToken, setShowGhToken] = useState(false);
 
   const panelRef = useRef(null);
@@ -70,39 +69,32 @@ function SettingsDialog({ onClose, settings, onSettingsChange, isExhausted }) {
             </div>
           </div>
 
-          {/* AI Section */}
+          {/* AI / Your Plan Section */}
           <div className="settings-section">
             <div className="settings-section-title">
-              <Key size={12} /> AI (Gemini)
+              <Key size={12} /> Your Plan
             </div>
-            {isExhausted && (
-              <div className="settings-warning" style={{ color: '#ef4444', fontSize: 11, marginBottom: 8, padding: '8px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '4px' }}>
-                Built-in AI quota exhausted. Enter your personal Gemini API key below to continue using AI features.
+            {credits ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span className="settings-label" style={{ margin: 0 }}>Token Balance</span>
+                  <span style={{ fontWeight: 700, fontSize: 16, color: credits.balance > 200 ? 'var(--success, #22c55e)' : 'var(--error, #ef4444)' }}>
+                    {credits.balance.toLocaleString()}
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 16 }}>
+                  <span>Purchased: {(credits.lifetimePurchased || 0).toLocaleString()}</span>
+                  <span>Used: {(credits.lifetimeUsed || 0).toLocaleString()}</span>
+                </div>
+                {credits.balance <= 200 && (
+                  <div style={{ color: '#ef4444', fontSize: 11, padding: '8px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '4px' }}>
+                    ⚠ Low token balance. Purchase more to keep using AI features.
+                  </div>
+                )}
               </div>
+            ) : (
+              <p className="settings-hint">Loading balance…</p>
             )}
-            <label className="settings-label" htmlFor="settings-gemini-key">Gemini API Key {isExhausted && <span style={{ color: '#ef4444' }}>(Required)</span>}</label>
-            <div className="settings-input-row">
-              <input
-                id="settings-gemini-key"
-                type={showKey ? 'text' : 'password'}
-                className="settings-input"
-                value={draft.geminiApiKey}
-                onChange={e => update('geminiApiKey', e.target.value.trim())}
-                placeholder="AIza…"
-                spellCheck={false}
-                autoComplete="off"
-              />
-              <button className="btn-icon" onClick={() => setShowKey(s => !s)} aria-label="Toggle key visibility" style={{ width: 28, height: 28, flexShrink: 0 }}>
-                {showKey ? <EyeOff size={12} /> : <Eye size={12} />}
-              </button>
-            </div>
-            <p className="settings-hint">
-              Get a free key at{' '}
-              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">
-                aistudio.google.com
-              </a>
-              . Requests go directly from your browser to Google. The key is stored encrypted in this browser and is never synced.
-            </p>
           </div>
 
           {/* GitHub Section */}
